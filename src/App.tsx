@@ -16,7 +16,7 @@ import { searchAmsterdamAddress, type GeocodeResult } from "./lib/geocode";
 import { formatDistance, formatLightCount, type LatLon } from "./lib/geo";
 import { buildBikeGraph, extractSignalPoints, type BikeGraph, type SignalPoint } from "./lib/graph";
 import { fetchBikeOsmData } from "./lib/overpass";
-import { calculateRoute, type RouteResult } from "./lib/routing";
+import { calculateIterativeSignalAvoidanceRoute, calculateRoute, type RouteResult } from "./lib/routing";
 
 type EditTarget = "start" | "end";
 
@@ -242,12 +242,16 @@ export default function App() {
       setGraph(nextGraph);
 
       setPhase("routing");
-      setStatusText("Calculating routes");
+      setStatusText("Calculating route alternatives");
       await nextFrame();
 
       const normal = calculateRoute(nextGraph, start, end, { trafficLightPenaltyMeters: 0 });
-      const avoidLights = calculateRoute(nextGraph, start, end, {
+      const avoidLights = calculateIterativeSignalAvoidanceRoute(nextGraph, start, end, {
         trafficLightPenaltyMeters: penaltyMeters,
+        maxIterations: 7,
+        referenceDistanceMeters: normal?.distanceMeters,
+        maxDistanceFactor: 2.4,
+        maxExtraDistanceMeters: 4_500,
       });
 
       if (!normal && !avoidLights) {
@@ -582,7 +586,7 @@ function RouteSummary({
     <article className={`route-summary ${accent}`}>
       <div>
         <h2>{title}</h2>
-        {route ? <p>{route.visitedNodes.toLocaleString()} visited nodes</p> : <p>Not calculated</p>}
+        {route ? <p>{routeSummaryMeta(route)}</p> : <p>Not calculated</p>}
       </div>
       <dl>
         <div>
@@ -596,6 +600,11 @@ function RouteSummary({
       </dl>
     </article>
   );
+}
+
+function routeSummaryMeta(route: RouteResult): string {
+  const passes = route.searchPasses > 1 ? ` · ${route.searchPasses} passes` : "";
+  return `${route.visitedNodes.toLocaleString()} visited nodes${passes}`;
 }
 
 function getHighlightedRouteSignals(routes: Routes, graph: BikeGraph): HighlightedRouteSignal[] {

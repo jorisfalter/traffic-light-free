@@ -7,6 +7,7 @@ export type RouteResult = {
   distanceMeters: number;
   weightedCost: number;
   trafficLights: number;
+  searchPasses: number;
   startNode: GraphNode;
   endNode: GraphNode;
   startSnapDistance: number;
@@ -16,6 +17,15 @@ export type RouteResult = {
 
 export type RouteOptions = {
   trafficLightPenaltyMeters: number;
+  blockedNodeIds?: Set<number>;
+};
+
+export type IterativeRouteOptions = {
+  trafficLightPenaltyMeters: number;
+  maxIterations: number;
+  referenceDistanceMeters?: number;
+  maxDistanceFactor?: number;
+  maxExtraDistanceMeters?: number;
 };
 
 export function calculateRoute(
@@ -43,12 +53,60 @@ export function calculateRoute(
 
   return {
     ...path,
+    searchPasses: 1,
     coordinates,
     startNode: startSnap.node,
     endNode: endSnap.node,
     startSnapDistance: startSnap.distanceMeters,
     endSnapDistance: endSnap.distanceMeters,
   };
+}
+
+export function calculateIterativeSignalAvoidanceRoute(
+  graph: BikeGraph,
+  start: LatLon,
+  end: LatLon,
+  options: IterativeRouteOptions,
+): RouteResult | null {
+  let current = calculateRoute(graph, start, end, {
+    trafficLightPenaltyMeters: options.trafficLightPenaltyMeters,
+  });
+
+  if (!current) {
+    return null;
+  }
+
+  let best = current;
+  const blockedSignalIds = new Set<number>();
+  const referenceDistanceMeters = options.referenceDistanceMeters ?? current.distanceMeters;
+  const maxDistanceMeters = Math.min(
+    referenceDistanceMeters * (options.maxDistanceFactor ?? 2.2),
+    referenceDistanceMeters + (options.maxExtraDistanceMeters ?? 3_500),
+  );
+
+  for (let pass = 2; pass <= options.maxIterations && current.trafficLights > 0; pass += 1) {
+    const addedSignals = addSignalBlocks(current, graph, blockedSignalIds);
+    if (addedSignals === 0) {
+      break;
+    }
+
+    const candidate = calculateRoute(graph, start, end, {
+      trafficLightPenaltyMeters: options.trafficLightPenaltyMeters,
+      blockedNodeIds: blockedSignalIds,
+    });
+
+    if (!candidate) {
+      break;
+    }
+
+    current = { ...candidate, searchPasses: pass };
+
+    if (current.distanceMeters <= maxDistanceMeters && isBetterSignalAvoidanceRoute(current, best)) {
+      best = current;
+    }
+  }
+
+  return best;
 }
 
 function findNearestNode(
@@ -108,6 +166,10 @@ function aStar(
     for (const edge of currentNode.edges) {
       const nextNode = graph.nodes.get(edge.to);
       if (!nextNode || visited.has(edge.to)) {
+        continue;
+      }
+
+      if (edge.to !== startId && edge.to !== endId && options.blockedNodeIds?.has(edge.to)) {
         continue;
       }
 
@@ -172,6 +234,32 @@ function reconstructRoute(
     trafficLights,
     visitedNodes,
   };
+}
+
+function addSignalBlocks(route: RouteResult, graph: BikeGraph, blockedSignalIds: Set<number>): number {
+  let addedSignals = 0;
+
+  for (let index = 1; index < route.nodeIds.length - 1; index += 1) {
+    const node = graph.nodes.get(route.nodeIds[index]);
+    if (node?.signal && !blockedSignalIds.has(node.id)) {
+      blockedSignalIds.add(node.id);
+      addedSignals += 1;
+    }
+  }
+
+  return addedSignals;
+}
+
+function isBetterSignalAvoidanceRoute(candidate: RouteResult, currentBest: RouteResult): boolean {
+  if (candidate.trafficLights !== currentBest.trafficLights) {
+    return candidate.trafficLights < currentBest.trafficLights;
+  }
+
+  if (candidate.weightedCost !== currentBest.weightedCost) {
+    return candidate.weightedCost < currentBest.weightedCost;
+  }
+
+  return candidate.distanceMeters < currentBest.distanceMeters;
 }
 
 function heuristic(from: LatLon, to: LatLon): number {

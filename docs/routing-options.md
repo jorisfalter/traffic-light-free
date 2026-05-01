@@ -311,4 +311,6 @@ The first slice:
   - traffic-light-avoidance route;
 - displays route distance and number of traffic lights crossed.
 
+The traffic-light-avoidance route is now iterative: after the first weighted route is found, the app temporarily blocks the traffic-signal nodes on that candidate route and reruns routing for a few passes. This helps discover obvious local detours around light clusters that a single weighted route may still accept.
+
 This is intentionally not the final production architecture. It is the fastest way to learn whether the product idea works.
