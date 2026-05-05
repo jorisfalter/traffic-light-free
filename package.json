@@ -6,9 +6,15 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
+    "ios:sync": "npm run build && cap sync ios",
+    "ios:open": "npm run ios:sync && cap open ios",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@capacitor/cli": "^8.3.1",
+    "@capacitor/core": "^8.3.1",
+    "@capacitor/geolocation": "^8.2.0",
+    "@capacitor/ios": "^8.3.1",
     "@vitejs/plugin-react": "^5.0.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.475.0",

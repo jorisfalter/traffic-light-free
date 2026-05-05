@@ -11,6 +11,8 @@ import {
   Search,
   SlidersHorizontal,
 } from "lucide-react";
+import { Capacitor } from "@capacitor/core";
+import { Geolocation, type CallbackID, type Position as CapacitorPosition } from "@capacitor/geolocation";
 import L from "leaflet";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { searchAmsterdamAddress, type GeocodeResult } from "./lib/geocode";
@@ -43,6 +45,16 @@ type GpsLocation = LatLon & {
   timestamp: number;
 };
 
+type LocationWatch =
+  | {
+      source: "capacitor";
+      id: CallbackID;
+    }
+  | {
+      source: "web";
+      id: number;
+    };
+
 const AMSTERDAM_CENTER: LatLon = { lat: 52.3676, lon: 4.9041 };
 const DEFAULT_START: LatLon = { lat: 52.3786, lon: 4.8838 };
 const DEFAULT_END: LatLon = { lat: 52.3571, lon: 4.9308 };
@@ -57,7 +69,7 @@ export default function App() {
   const routeSignalLayerRef = useRef<L.LayerGroup | null>(null);
   const gpsLayerRef = useRef<L.LayerGroup | null>(null);
   const editTargetRef = useRef<EditTarget>("start");
-  const locationWatchIdRef = useRef<number | null>(null);
+  const locationWatchIdRef = useRef<LocationWatch | null>(null);
 
   const [start, setStart] = useState<LatLon>(DEFAULT_START);
   const [end, setEnd] = useState<LatLon>(DEFAULT_END);
@@ -141,9 +153,7 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      if (locationWatchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(locationWatchIdRef.current);
-      }
+      void clearGpsWatch(locationWatchIdRef);
     };
   }, []);
 
@@ -338,29 +348,63 @@ export default function App() {
 
   function handleGpsToggle() {
     if (gpsPhase === "tracking" || gpsPhase === "requesting") {
-      stopGpsTracking();
+      void stopGpsTracking();
       return;
     }
 
-    startGpsTracking();
+    void startGpsTracking();
   }
 
-  function startGpsTracking() {
+  async function startGpsTracking() {
+    await clearGpsWatch(locationWatchIdRef);
+
+    setGpsPhase("requesting");
+    setGpsError(null);
+    setGpsFollowMode(true);
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const permission = await Geolocation.requestPermissions({ permissions: ["location"] });
+        if (permission.location === "denied") {
+          throw new Error("Location permission was denied.");
+        }
+
+        const id = await Geolocation.watchPosition(
+          {
+            enableHighAccuracy: true,
+            maximumAge: 2_000,
+            timeout: 15_000,
+          },
+          (position, error) => {
+            if (error) {
+              setGpsPhase("error");
+              setGpsError(gpsErrorMessage(error));
+              return;
+            }
+
+            if (position) {
+              setGpsLocation(gpsLocationFromCapacitor(position));
+              setGpsPhase("tracking");
+            }
+          },
+        );
+
+        locationWatchIdRef.current = { source: "capacitor", id };
+      } catch (error) {
+        setGpsPhase("error");
+        setGpsError(gpsErrorMessage(error));
+      }
+
+      return;
+    }
+
     if (!navigator.geolocation) {
       setGpsPhase("error");
       setGpsError("GPS is not available in this browser.");
       return;
     }
 
-    if (locationWatchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(locationWatchIdRef.current);
-    }
-
-    setGpsPhase("requesting");
-    setGpsError(null);
-    setGpsFollowMode(true);
-
-    locationWatchIdRef.current = navigator.geolocation.watchPosition(
+    const id = navigator.geolocation.watchPosition(
       (position) => {
         setGpsLocation({
           lat: position.coords.latitude,
@@ -382,13 +426,12 @@ export default function App() {
         timeout: 15_000,
       },
     );
+
+    locationWatchIdRef.current = { source: "web", id };
   }
 
-  function stopGpsTracking() {
-    if (locationWatchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(locationWatchIdRef.current);
-      locationWatchIdRef.current = null;
-    }
+  async function stopGpsTracking() {
+    await clearGpsWatch(locationWatchIdRef);
 
     setGpsPhase("idle");
     setGpsError(null);
@@ -791,20 +834,61 @@ function gpsLabel(phase: GpsPhase, location: GpsLocation | null): string {
   return `GPS ±${Math.round(location.accuracy)} m`;
 }
 
-function gpsErrorMessage(error: GeolocationPositionError): string {
-  if (error.code === error.PERMISSION_DENIED) {
-    return "Location permission was denied.";
+async function clearGpsWatch(watchRef: { current: LocationWatch | null }): Promise<void> {
+  const watch = watchRef.current;
+  if (!watch) {
+    return;
   }
 
-  if (error.code === error.POSITION_UNAVAILABLE) {
-    return "Current location is unavailable.";
+  watchRef.current = null;
+
+  if (watch.source === "capacitor") {
+    await Geolocation.clearWatch({ id: watch.id });
+    return;
   }
 
-  if (error.code === error.TIMEOUT) {
-    return "GPS lookup timed out.";
+  navigator.geolocation.clearWatch(watch.id);
+}
+
+function gpsLocationFromCapacitor(position: CapacitorPosition): GpsLocation {
+  return {
+    lat: position.coords.latitude,
+    lon: position.coords.longitude,
+    accuracy: position.coords.accuracy,
+    heading: position.coords.heading,
+    speed: position.coords.speed,
+    timestamp: position.timestamp,
+  };
+}
+
+function gpsErrorMessage(error: unknown): string {
+  if (isWebGeolocationError(error)) {
+    if (error.code === 1) {
+      return "Location permission was denied.";
+    }
+
+    if (error.code === 2) {
+      return "Current location is unavailable.";
+    }
+
+    if (error.code === 3) {
+      return "GPS lookup timed out.";
+    }
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === "object" && error && "message" in error && typeof error.message === "string") {
+    return error.message;
   }
 
   return "Could not read current location.";
+}
+
+function isWebGeolocationError(error: unknown): error is GeolocationPositionError {
+  return typeof error === "object" && error !== null && "code" in error && typeof error.code === "number";
 }
 
 function formatSpeed(speedMetersPerSecond: number): string {
