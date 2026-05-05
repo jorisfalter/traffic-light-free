@@ -1,0 +1,19 @@
+{
+  "name": "Lightless Bike Amsterdam",
+  "short_name": "Lightless Bike",
+  "description": "Traffic-light-aware cycling routes for Amsterdam with live GPS follow mode.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#edf2f4",
+  "theme_color": "#0f766e",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

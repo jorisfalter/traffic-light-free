@@ -243,7 +243,7 @@ dt {
 
 .toolbar {
   display: grid;
-  grid-template-columns: 42px 42px 1fr;
+  grid-template-columns: 42px 42px 42px 1fr;
   gap: 9px;
 }
 
@@ -263,6 +263,12 @@ dt {
   border: 1px solid var(--line);
 }
 
+.gps-toggle.active {
+  color: #ffffff;
+  background: var(--teal);
+  border-color: var(--teal);
+}
+
 .primary-button {
   gap: 8px;
   color: #ffffff;
@@ -277,6 +283,7 @@ dt {
 }
 
 .settings-panel,
+.gps-panel,
 .status-strip,
 .error-panel,
 .comparison-panel,
@@ -291,6 +298,52 @@ dt {
   flex-direction: column;
   gap: 13px;
   padding: 12px;
+}
+
+.gps-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.gps-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.gps-actions button {
+  min-height: 36px;
+  color: #263548;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.gps-actions button.active {
+  color: #ffffff;
+  background: var(--teal);
+  border-color: var(--teal);
+}
+
+.gps-actions button:disabled {
+  color: #8a96a4;
+  background: #eef2f5;
+  cursor: default;
+}
+
+.gps-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.gps-error {
+  color: #8b1234;
+  font-size: 0.82rem;
 }
 
 .section-title {
@@ -494,6 +547,18 @@ dt {
   border-radius: 6px;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.18);
   font-weight: 700;
+}
+
+.gps-location-marker {
+  filter: drop-shadow(0 5px 10px rgba(15, 118, 110, 0.38));
+}
+
+.gps-tooltip {
+  color: #0f3f3b;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.18);
+  font-weight: 760;
 }
 
 @keyframes spin {

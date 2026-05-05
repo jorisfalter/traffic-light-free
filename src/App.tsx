@@ -3,6 +3,7 @@ import {
   ArrowLeftRight,
   Bike,
   Flag,
+  LocateFixed,
   LoaderCircle,
   MapPin,
   Navigation,
@@ -27,11 +28,19 @@ type Routes = {
 
 type RoutePhase = "idle" | "fetching" | "building" | "routing" | "ready" | "error";
 type SearchPhase = "idle" | "searching" | "ready" | "error";
+type GpsPhase = "idle" | "requesting" | "tracking" | "error";
 
 type HighlightedRouteSignal = LatLon & {
   id: number;
   normalIndex?: number;
   avoidLightsIndex?: number;
+};
+
+type GpsLocation = LatLon & {
+  accuracy: number;
+  heading: number | null;
+  speed: number | null;
+  timestamp: number;
 };
 
 const AMSTERDAM_CENTER: LatLon = { lat: 52.3676, lon: 4.9041 };
@@ -46,7 +55,9 @@ export default function App() {
   const routeLayerRef = useRef<L.LayerGroup | null>(null);
   const signalLayerRef = useRef<L.LayerGroup | null>(null);
   const routeSignalLayerRef = useRef<L.LayerGroup | null>(null);
+  const gpsLayerRef = useRef<L.LayerGroup | null>(null);
   const editTargetRef = useRef<EditTarget>("start");
+  const locationWatchIdRef = useRef<number | null>(null);
 
   const [start, setStart] = useState<LatLon>(DEFAULT_START);
   const [end, setEnd] = useState<LatLon>(DEFAULT_END);
@@ -71,6 +82,10 @@ export default function App() {
   const [signals, setSignals] = useState<SignalPoint[]>([]);
   const [routes, setRoutes] = useState<Routes>(EMPTY_ROUTES);
   const [overpassEndpoint, setOverpassEndpoint] = useState<string | null>(null);
+  const [gpsPhase, setGpsPhase] = useState<GpsPhase>("idle");
+  const [gpsLocation, setGpsLocation] = useState<GpsLocation | null>(null);
+  const [gpsFollowMode, setGpsFollowMode] = useState(true);
+  const [gpsError, setGpsError] = useState<string | null>(null);
 
   const routeButtonLabel = phase === "fetching" || phase === "building" || phase === "routing" ? "Routing" : "Route";
   const isBusy = phase === "fetching" || phase === "building" || phase === "routing";
@@ -108,6 +123,7 @@ export default function App() {
     signalLayerRef.current = L.layerGroup().addTo(map);
     routeLayerRef.current = L.layerGroup().addTo(map);
     routeSignalLayerRef.current = L.layerGroup().addTo(map);
+    gpsLayerRef.current = L.layerGroup().addTo(map);
     markerLayerRef.current = L.layerGroup().addTo(map);
 
     map.on("click", (event) => {
@@ -121,6 +137,14 @@ export default function App() {
     window.setTimeout(() => {
       map.invalidateSize();
     }, 0);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (locationWatchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(locationWatchIdRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -224,6 +248,50 @@ export default function App() {
     }
   }, [routes, graph]);
 
+  useEffect(() => {
+    const gpsLayer = gpsLayerRef.current;
+    const map = mapRef.current;
+    if (!gpsLayer || !map) {
+      return;
+    }
+
+    gpsLayer.clearLayers();
+    if (!gpsLocation) {
+      return;
+    }
+
+    if (gpsLocation.accuracy <= 500) {
+      L.circle([gpsLocation.lat, gpsLocation.lon], {
+        radius: gpsLocation.accuracy,
+        color: "#0f766e",
+        weight: 1,
+        fillColor: "#0f766e",
+        fillOpacity: 0.08,
+        opacity: 0.35,
+      }).addTo(gpsLayer);
+    }
+
+    const marker = L.circleMarker([gpsLocation.lat, gpsLocation.lon], {
+      radius: 10,
+      color: "#ffffff",
+      weight: 4,
+      fillColor: "#0f766e",
+      fillOpacity: 1,
+      opacity: 1,
+      className: "gps-location-marker",
+    }).addTo(gpsLayer);
+
+    marker.bindTooltip(`GPS · ±${Math.round(gpsLocation.accuracy)} m`, {
+      sticky: true,
+      className: "gps-tooltip",
+    });
+
+    if (gpsFollowMode) {
+      const targetZoom = Math.max(map.getZoom(), 16);
+      map.setView([gpsLocation.lat, gpsLocation.lon], targetZoom, { animate: true });
+    }
+  }, [gpsLocation, gpsFollowMode]);
+
   async function handleRoute() {
     setErrorText(null);
     setPhase("fetching");
@@ -266,6 +334,75 @@ export default function App() {
       setStatusText("Route failed");
       setErrorText(error instanceof Error ? error.message : "Something went wrong while routing.");
     }
+  }
+
+  function handleGpsToggle() {
+    if (gpsPhase === "tracking" || gpsPhase === "requesting") {
+      stopGpsTracking();
+      return;
+    }
+
+    startGpsTracking();
+  }
+
+  function startGpsTracking() {
+    if (!navigator.geolocation) {
+      setGpsPhase("error");
+      setGpsError("GPS is not available in this browser.");
+      return;
+    }
+
+    if (locationWatchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(locationWatchIdRef.current);
+    }
+
+    setGpsPhase("requesting");
+    setGpsError(null);
+    setGpsFollowMode(true);
+
+    locationWatchIdRef.current = navigator.geolocation.watchPosition(
+      (position) => {
+        setGpsLocation({
+          lat: position.coords.latitude,
+          lon: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          heading: position.coords.heading,
+          speed: position.coords.speed,
+          timestamp: position.timestamp,
+        });
+        setGpsPhase("tracking");
+      },
+      (error) => {
+        setGpsPhase("error");
+        setGpsError(gpsErrorMessage(error));
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 2_000,
+        timeout: 15_000,
+      },
+    );
+  }
+
+  function stopGpsTracking() {
+    if (locationWatchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(locationWatchIdRef.current);
+      locationWatchIdRef.current = null;
+    }
+
+    setGpsPhase("idle");
+    setGpsError(null);
+    setGpsLocation(null);
+  }
+
+  function useGpsAsStart() {
+    if (!gpsLocation) {
+      return;
+    }
+
+    setRoutePoint("start", gpsLocation);
+    setAddressInputs((current) => ({ ...current, start: "Current GPS location" }));
+    setGpsFollowMode(true);
   }
 
   async function handleAddressSearch(target: EditTarget) {
@@ -411,6 +548,14 @@ export default function App() {
         </div>
 
         <div className="toolbar">
+          <button
+            type="button"
+            className={`icon-button gps-toggle ${gpsPhase === "tracking" ? "active" : ""}`}
+            onClick={handleGpsToggle}
+            title={gpsPhase === "tracking" || gpsPhase === "requesting" ? "Stop GPS" : "Start GPS"}
+          >
+            {gpsPhase === "requesting" ? <LoaderCircle className="spin" size={18} /> : <LocateFixed size={18} />}
+          </button>
           <button type="button" className="icon-button" onClick={handleSwap} title="Swap start and finish">
             <ArrowLeftRight size={18} />
           </button>
@@ -422,6 +567,29 @@ export default function App() {
             {routeButtonLabel}
           </button>
         </div>
+
+        <section className="gps-panel" aria-label="GPS controls">
+          <div className="gps-actions">
+            <button type="button" onClick={useGpsAsStart} disabled={!gpsLocation}>
+              Start here
+            </button>
+            <button
+              type="button"
+              className={gpsFollowMode ? "active" : ""}
+              onClick={() => setGpsFollowMode((current) => !current)}
+              disabled={!gpsLocation}
+            >
+              Follow
+            </button>
+          </div>
+          <div className="gps-meta">
+            <span>{gpsLabel(gpsPhase, gpsLocation)}</span>
+            {gpsLocation?.speed !== null && gpsLocation?.speed !== undefined ? (
+              <span>{formatSpeed(gpsLocation.speed)}</span>
+            ) : null}
+          </div>
+          {gpsError ? <p className="gps-error">{gpsError}</p> : null}
+        </section>
 
         <section className="settings-panel" aria-label="Route weighting">
           <div className="section-title">
@@ -605,6 +773,42 @@ function RouteSummary({
 function routeSummaryMeta(route: RouteResult): string {
   const passes = route.searchPasses > 1 ? ` · ${route.searchPasses} passes` : "";
   return `${route.visitedNodes.toLocaleString()} visited nodes${passes}`;
+}
+
+function gpsLabel(phase: GpsPhase, location: GpsLocation | null): string {
+  if (phase === "requesting") {
+    return "GPS starting";
+  }
+
+  if (phase === "error") {
+    return "GPS unavailable";
+  }
+
+  if (!location) {
+    return "GPS off";
+  }
+
+  return `GPS ±${Math.round(location.accuracy)} m`;
+}
+
+function gpsErrorMessage(error: GeolocationPositionError): string {
+  if (error.code === error.PERMISSION_DENIED) {
+    return "Location permission was denied.";
+  }
+
+  if (error.code === error.POSITION_UNAVAILABLE) {
+    return "Current location is unavailable.";
+  }
+
+  if (error.code === error.TIMEOUT) {
+    return "GPS lookup timed out.";
+  }
+
+  return "Could not read current location.";
+}
+
+function formatSpeed(speedMetersPerSecond: number): string {
+  return `${Math.round(speedMetersPerSecond * 3.6)} km/h`;
 }
 
 function getHighlightedRouteSignals(routes: Routes, graph: BikeGraph): HighlightedRouteSignal[] {
