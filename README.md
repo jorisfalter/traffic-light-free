@@ -1,6 +1,6 @@
-# Traffic-Light-Free Amsterdam
+# Traffic-Light-Free Amsterdam Region
 
-A first prototype for cycling routes in Amsterdam that can compare a normal route with a route that heavily penalizes OSM traffic-light nodes.
+A first prototype for cycling routes around Amsterdam and nearby places such as Amstelveen that can compare a normal route with a route that heavily penalizes OSM traffic-light nodes.
 
 ## What Exists Now
 

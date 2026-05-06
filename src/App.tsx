@@ -15,7 +15,7 @@ import { Capacitor } from "@capacitor/core";
 import { Geolocation, type CallbackID, type Position as CapacitorPosition } from "@capacitor/geolocation";
 import L from "leaflet";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { searchAmsterdamAddress, type GeocodeResult } from "./lib/geocode";
+import { searchRouteAddress, type GeocodeResult } from "./lib/geocode";
 import { formatDistance, formatLightCount, type LatLon } from "./lib/geo";
 import { buildBikeGraph, extractSignalPoints, type BikeGraph, type SignalPoint } from "./lib/graph";
 import { fetchBikeOsmData } from "./lib/overpass";
@@ -455,12 +455,12 @@ export default function App() {
     setSearchError(null);
 
     try {
-      const results = await searchAmsterdamAddress(query);
+      const results = await searchRouteAddress(query);
       setAddressResults((current) => ({ ...current, [target]: results }));
 
       if (results.length === 0) {
         setSearchPhase("error");
-        setSearchError("No address found in Amsterdam.");
+        setSearchError("No address found in the Amsterdam region.");
         return;
       }
 
@@ -527,7 +527,7 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <section className="map-stage" aria-label="Amsterdam cycling map">
+      <section className="map-stage" aria-label="Amsterdam region cycling map">
         <div ref={mapElementRef} className="map-canvas" />
       </section>
 
@@ -538,7 +538,7 @@ export default function App() {
           </div>
           <div>
             <h1>Lightless Bike</h1>
-            <p>Amsterdam</p>
+            <p>Amsterdam region</p>
           </div>
         </header>
 
@@ -752,7 +752,7 @@ function AddressSearchRow({
           <input
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
-            placeholder={target === "start" ? "Amsterdam Centraal" : "Museumplein"}
+            placeholder={target === "start" ? "Amsterdam Centraal" : "Gerard Doulaan 1, Amstelveen"}
           />
           <button type="submit" title={`Search ${label.toLowerCase()}`} disabled={isSearching || value.trim().length < 2}>
             {isSearching ? <LoaderCircle className="spin" size={17} /> : <Search size={17} />}

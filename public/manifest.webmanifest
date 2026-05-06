@@ -1,7 +1,7 @@
 {
   "name": "Lightless Bike Amsterdam",
   "short_name": "Lightless Bike",
-  "description": "Traffic-light-aware cycling routes for Amsterdam with live GPS follow mode.",
+  "description": "Traffic-light-aware cycling routes for the Amsterdam region with live GPS follow mode.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

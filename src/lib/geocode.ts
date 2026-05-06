@@ -15,26 +15,41 @@ type NominatimResult = {
 };
 
 const NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search";
-const AMSTERDAM_VIEWBOX = "4.7288,52.4312,5.0792,52.2780";
+const AMSTERDAM_REGION_BOUNDS = {
+  west: 4.55,
+  south: 52.15,
+  east: 5.15,
+  north: 52.55,
+};
+const AMSTERDAM_REGION_VIEWBOX = [
+  AMSTERDAM_REGION_BOUNDS.west,
+  AMSTERDAM_REGION_BOUNDS.north,
+  AMSTERDAM_REGION_BOUNDS.east,
+  AMSTERDAM_REGION_BOUNDS.south,
+].join(",");
 
-export async function searchAmsterdamAddress(query: string): Promise<GeocodeResult[]> {
+export async function searchRouteAddress(query: string): Promise<GeocodeResult[]> {
   const trimmedQuery = query.trim();
   if (trimmedQuery.length < 2) {
     return [];
   }
 
-  const scopedQuery = /amsterdam|nederland|netherlands/i.test(trimmedQuery)
-    ? trimmedQuery
-    : `${trimmedQuery}, Amsterdam`;
+  const primaryResults = await runNominatimSearch(trimmedQuery);
+  if (primaryResults.length > 0 || hasPlaceQualifier(trimmedQuery)) {
+    return primaryResults;
+  }
 
+  return runNominatimSearch(`${trimmedQuery}, Amsterdam`);
+}
+
+async function runNominatimSearch(query: string): Promise<GeocodeResult[]> {
   const params = new URLSearchParams({
-    q: scopedQuery,
+    q: query,
     format: "jsonv2",
-    limit: "5",
+    limit: "8",
     addressdetails: "1",
     countrycodes: "nl",
-    viewbox: AMSTERDAM_VIEWBOX,
-    bounded: "1",
+    viewbox: AMSTERDAM_REGION_VIEWBOX,
     "accept-language": "nl,en",
   });
 
@@ -53,5 +68,22 @@ export async function searchAmsterdamAddress(query: string): Promise<GeocodeResu
       label: result.display_name,
       type: result.type,
     }))
-    .filter((result) => Number.isFinite(result.lat) && Number.isFinite(result.lon));
+    .filter((result) => Number.isFinite(result.lat) && Number.isFinite(result.lon))
+    .filter(isInAmsterdamRegion)
+    .slice(0, 5);
+}
+
+function isInAmsterdamRegion(result: GeocodeResult): boolean {
+  return (
+    result.lon >= AMSTERDAM_REGION_BOUNDS.west &&
+    result.lon <= AMSTERDAM_REGION_BOUNDS.east &&
+    result.lat >= AMSTERDAM_REGION_BOUNDS.south &&
+    result.lat <= AMSTERDAM_REGION_BOUNDS.north
+  );
+}
+
+function hasPlaceQualifier(query: string): boolean {
+  return /[,]|amsterdam|amstelveen|diemen|ouderkerk|badhoevedorp|zaandam|weesp|aalsmeer|hoofddorp|nederland|netherlands/i.test(
+    query,
+  );
 }
