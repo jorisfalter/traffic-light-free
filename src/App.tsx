@@ -150,6 +150,21 @@ export default function App() {
       setRoutePoint(editTargetRef.current, point);
     });
 
+    map.on("dragstart", () => {
+      setGpsFollowMode(false);
+    });
+
+    map.on("wheel", () => {
+      setGpsFollowMode(false);
+    });
+
+    map.on("touchstart", (event) => {
+      const touchEvent = (event as L.LeafletEvent & { originalEvent?: TouchEvent }).originalEvent;
+      if (touchEvent?.touches.length && touchEvent.touches.length > 1) {
+        setGpsFollowMode(false);
+      }
+    });
+
     mapRef.current = map;
     map.getContainer().style.cursor = "crosshair";
 
