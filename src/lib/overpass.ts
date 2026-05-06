@@ -62,6 +62,8 @@ export async function fetchBikeOsmData(
   way["highway"~"^(${BIKE_RELEVANT_HIGHWAYS})$"]["area"!="yes"](${overpassBBox});
   node["highway"="traffic_signals"](${overpassBBox});
   node["crossing"="traffic_signals"](${overpassBBox});
+  node["crossing:signals"="yes"](${overpassBBox});
+  node["traffic_signals:bicycle"](${overpassBBox});
 );
 (._;>;);
 out body qt;
@@ -106,9 +108,21 @@ out body qt;
 }
 
 export function isTrafficSignal(tags?: OsmTags): boolean {
+  if (!tags) {
+    return false;
+  }
+
+  const hasSignalCrossing =
+    tags.crossing === "traffic_signals" ||
+    ["yes", "traffic_signals", "signalized", "signalised"].includes(tags["crossing:signals"] ?? "");
+
+  const hasBicycleSignal =
+    ["yes", "traffic_signals", "signalized", "signalised"].includes(tags["traffic_signals:bicycle"] ?? "") ||
+    ["yes", "traffic_signals", "signalized", "signalised"].includes(tags["traffic_signals:pedestrian"] ?? "");
+
   return (
     tags?.highway === "traffic_signals" ||
-    tags?.crossing === "traffic_signals" ||
-    tags?.["traffic_signals:bicycle"] === "yes"
+    hasSignalCrossing ||
+    hasBicycleSignal
   );
 }

@@ -24,6 +24,7 @@ Crossings may also be represented as:
 ```txt
 highway=crossing
 crossing=traffic_signals
+crossing:signals=yes
 ```
 
 Cycle-specific signal mapping can include tags such as `traffic_signals:bicycle=*`, `traffic_signals:direction=*`, and red-turn exceptions. The most important rule for routing is that traffic signal nodes should be attached to the ways they affect, not merely placed beside the road.
