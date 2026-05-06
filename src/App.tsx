@@ -11,8 +11,6 @@ import {
   Search,
   SlidersHorizontal,
 } from "lucide-react";
-import { Capacitor } from "@capacitor/core";
-import { Geolocation, type CallbackID, type Position as CapacitorPosition } from "@capacitor/geolocation";
 import L from "leaflet";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { searchRouteAddress, type GeocodeResult } from "./lib/geocode";
@@ -45,16 +43,6 @@ type GpsLocation = LatLon & {
   timestamp: number;
 };
 
-type LocationWatch =
-  | {
-      source: "capacitor";
-      id: CallbackID;
-    }
-  | {
-      source: "web";
-      id: number;
-    };
-
 const AMSTERDAM_CENTER: LatLon = { lat: 52.3676, lon: 4.9041 };
 const DEFAULT_START: LatLon = { lat: 52.3786, lon: 4.8838 };
 const DEFAULT_END: LatLon = { lat: 52.3571, lon: 4.9308 };
@@ -69,7 +57,7 @@ export default function App() {
   const routeSignalLayerRef = useRef<L.LayerGroup | null>(null);
   const gpsLayerRef = useRef<L.LayerGroup | null>(null);
   const editTargetRef = useRef<EditTarget>("start");
-  const locationWatchIdRef = useRef<LocationWatch | null>(null);
+  const locationWatchIdRef = useRef<number | null>(null);
 
   const [start, setStart] = useState<LatLon>(DEFAULT_START);
   const [end, setEnd] = useState<LatLon>(DEFAULT_END);
@@ -153,7 +141,9 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      void clearGpsWatch(locationWatchIdRef);
+      if (locationWatchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(locationWatchIdRef.current);
+      }
     };
   }, []);
 
@@ -348,55 +338,22 @@ export default function App() {
 
   function handleGpsToggle() {
     if (gpsPhase === "tracking" || gpsPhase === "requesting") {
-      void stopGpsTracking();
+      stopGpsTracking();
       return;
     }
 
-    void startGpsTracking();
+    startGpsTracking();
   }
 
-  async function startGpsTracking() {
-    await clearGpsWatch(locationWatchIdRef);
+  function startGpsTracking() {
+    if (locationWatchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(locationWatchIdRef.current);
+      locationWatchIdRef.current = null;
+    }
 
     setGpsPhase("requesting");
     setGpsError(null);
     setGpsFollowMode(true);
-
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const permission = await Geolocation.requestPermissions({ permissions: ["location"] });
-        if (permission.location === "denied") {
-          throw new Error("Location permission was denied.");
-        }
-
-        const id = await Geolocation.watchPosition(
-          {
-            enableHighAccuracy: true,
-            maximumAge: 2_000,
-            timeout: 15_000,
-          },
-          (position, error) => {
-            if (error) {
-              setGpsPhase("error");
-              setGpsError(gpsErrorMessage(error));
-              return;
-            }
-
-            if (position) {
-              setGpsLocation(gpsLocationFromCapacitor(position));
-              setGpsPhase("tracking");
-            }
-          },
-        );
-
-        locationWatchIdRef.current = { source: "capacitor", id };
-      } catch (error) {
-        setGpsPhase("error");
-        setGpsError(gpsErrorMessage(error));
-      }
-
-      return;
-    }
 
     if (!navigator.geolocation) {
       setGpsPhase("error");
@@ -427,11 +384,14 @@ export default function App() {
       },
     );
 
-    locationWatchIdRef.current = { source: "web", id };
+    locationWatchIdRef.current = id;
   }
 
-  async function stopGpsTracking() {
-    await clearGpsWatch(locationWatchIdRef);
+  function stopGpsTracking() {
+    if (locationWatchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(locationWatchIdRef.current);
+      locationWatchIdRef.current = null;
+    }
 
     setGpsPhase("idle");
     setGpsError(null);
@@ -832,33 +792,6 @@ function gpsLabel(phase: GpsPhase, location: GpsLocation | null): string {
   }
 
   return `GPS ±${Math.round(location.accuracy)} m`;
-}
-
-async function clearGpsWatch(watchRef: { current: LocationWatch | null }): Promise<void> {
-  const watch = watchRef.current;
-  if (!watch) {
-    return;
-  }
-
-  watchRef.current = null;
-
-  if (watch.source === "capacitor") {
-    await Geolocation.clearWatch({ id: watch.id });
-    return;
-  }
-
-  navigator.geolocation.clearWatch(watch.id);
-}
-
-function gpsLocationFromCapacitor(position: CapacitorPosition): GpsLocation {
-  return {
-    lat: position.coords.latitude,
-    lon: position.coords.longitude,
-    accuracy: position.coords.accuracy,
-    heading: position.coords.heading,
-    speed: position.coords.speed,
-    timestamp: position.timestamp,
-  };
 }
 
 function gpsErrorMessage(error: unknown): string {
