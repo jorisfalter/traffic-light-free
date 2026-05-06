@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { searchRouteAddress, type GeocodeResult } from "./lib/geocode";
 import { formatDistance, formatLightCount, type LatLon } from "./lib/geo";
 import { buildBikeGraph, extractSignalPoints, type BikeGraph, type SignalPoint } from "./lib/graph";
+import { getNavigationProgress, navigationSummary, type NavigationProgress } from "./lib/navigation";
 import { fetchBikeOsmData } from "./lib/overpass";
 import { calculateIterativeSignalAvoidanceRoute, calculateRoute, type RouteResult } from "./lib/routing";
 
@@ -58,6 +59,8 @@ export default function App() {
   const gpsLayerRef = useRef<L.LayerGroup | null>(null);
   const editTargetRef = useRef<EditTarget>("start");
   const locationWatchIdRef = useRef<number | null>(null);
+  const lastAutoRerouteAtRef = useRef(0);
+  const selectedAddressRef = useRef<Record<EditTarget, string>>({ start: "", end: "" });
 
   const [start, setStart] = useState<LatLon>(DEFAULT_START);
   const [end, setEnd] = useState<LatLon>(DEFAULT_END);
@@ -86,9 +89,17 @@ export default function App() {
   const [gpsLocation, setGpsLocation] = useState<GpsLocation | null>(null);
   const [gpsFollowMode, setGpsFollowMode] = useState(true);
   const [gpsError, setGpsError] = useState<string | null>(null);
+  const [navigationActive, setNavigationActive] = useState(false);
+  const [autoReroute, setAutoReroute] = useState(true);
+  const [navigationMessage, setNavigationMessage] = useState<string | null>(null);
 
   const routeButtonLabel = phase === "fetching" || phase === "building" || phase === "routing" ? "Routing" : "Route";
   const isBusy = phase === "fetching" || phase === "building" || phase === "routing";
+  const activeRoute = routes.avoidLights ?? routes.normal;
+  const navigationProgress = useMemo(
+    () => (navigationActive && gpsLocation && activeRoute ? getNavigationProgress(activeRoute, gpsLocation) : null),
+    [activeRoute, gpsLocation, navigationActive],
+  );
 
   const routeComparison = useMemo(() => {
     if (!routes.normal || !routes.avoidLights) {
@@ -104,6 +115,14 @@ export default function App() {
   useEffect(() => {
     editTargetRef.current = editTarget;
   }, [editTarget]);
+
+  useEffect(() => {
+    return queueAddressSuggestions("start", addressInputs.start);
+  }, [addressInputs.start]);
+
+  useEffect(() => {
+    return queueAddressSuggestions("end", addressInputs.end);
+  }, [addressInputs.end]);
 
   useEffect(() => {
     if (!mapElementRef.current || mapRef.current) {
@@ -292,13 +311,36 @@ export default function App() {
     }
   }, [gpsLocation, gpsFollowMode]);
 
+  useEffect(() => {
+    if (!navigationActive || !autoReroute || !navigationProgress?.offRoute || !gpsLocation || isBusy) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastAutoRerouteAtRef.current < 15_000) {
+      return;
+    }
+
+    lastAutoRerouteAtRef.current = now;
+    void routeFromGps({ startNavigation: true, reason: "Rerouting from current location" });
+  }, [autoReroute, gpsLocation, isBusy, navigationActive, navigationProgress?.offRoute]);
+
   async function handleRoute() {
+    await calculateRoutes(start, end);
+  }
+
+  async function calculateRoutes(
+    routeStart: LatLon,
+    routeEnd: LatLon,
+    options: { startNavigation?: boolean; reason?: string } = {},
+  ) {
     setErrorText(null);
+    setNavigationMessage(options.reason ?? null);
     setPhase("fetching");
     setStatusText("Fetching OSM data");
 
     try {
-      const payload = await fetchBikeOsmData(start, end, paddingKm);
+      const payload = await fetchBikeOsmData(routeStart, routeEnd, paddingKm);
       setOverpassEndpoint(payload.endpoint);
       setSignals(extractSignalPoints(payload.elements));
 
@@ -313,8 +355,8 @@ export default function App() {
       setStatusText("Calculating route alternatives");
       await nextFrame();
 
-      const normal = calculateRoute(nextGraph, start, end, { trafficLightPenaltyMeters: 0 });
-      const avoidLights = calculateIterativeSignalAvoidanceRoute(nextGraph, start, end, {
+      const normal = calculateRoute(nextGraph, routeStart, routeEnd, { trafficLightPenaltyMeters: 0 });
+      const avoidLights = calculateIterativeSignalAvoidanceRoute(nextGraph, routeStart, routeEnd, {
         trafficLightPenaltyMeters: penaltyMeters,
         maxIterations: 7,
         referenceDistanceMeters: normal?.distanceMeters,
@@ -327,12 +369,18 @@ export default function App() {
       }
 
       setRoutes({ normal, avoidLights });
+      if (options.startNavigation) {
+        setNavigationActive(true);
+        setGpsFollowMode(true);
+      }
       setPhase("ready");
       setStatusText("Routes ready");
+      setNavigationMessage(null);
     } catch (error) {
       setPhase("error");
       setStatusText("Route failed");
       setErrorText(error instanceof Error ? error.message : "Something went wrong while routing.");
+      setNavigationMessage(null);
     }
   }
 
@@ -400,12 +448,103 @@ export default function App() {
 
   function useGpsAsStart() {
     if (!gpsLocation) {
+      startGpsTracking();
       return;
     }
 
     setRoutePoint("start", gpsLocation);
+    selectedAddressRef.current.start = "Current GPS location";
     setAddressInputs((current) => ({ ...current, start: "Current GPS location" }));
     setGpsFollowMode(true);
+  }
+
+  async function routeFromGps(options: { startNavigation?: boolean; reason?: string } = {}) {
+    if (!gpsLocation) {
+      startGpsTracking();
+      setGpsError("GPS is starting. Try again once your position appears.");
+      return;
+    }
+
+    const routeStart = { lat: gpsLocation.lat, lon: gpsLocation.lon };
+    setStart(routeStart);
+    selectedAddressRef.current.start = "Current GPS location";
+    setAddressInputs((current) => ({ ...current, start: "Current GPS location" }));
+    setGpsFollowMode(true);
+    await calculateRoutes(routeStart, end, options);
+  }
+
+  function handleNavigationToggle() {
+    if (navigationActive) {
+      setNavigationActive(false);
+      setNavigationMessage(null);
+      return;
+    }
+
+    if (!gpsLocation) {
+      startGpsTracking();
+      setGpsError("GPS is starting. Start navigation once your position appears.");
+      return;
+    }
+
+    if (!activeRoute) {
+      void routeFromGps({ startNavigation: true });
+      return;
+    }
+
+    setNavigationActive(true);
+    setNavigationMessage(null);
+    setGpsFollowMode(true);
+  }
+
+  async function handleManualReroute() {
+    lastAutoRerouteAtRef.current = Date.now();
+    await routeFromGps({ startNavigation: navigationActive, reason: "Rerouting from current location" });
+  }
+
+  function queueAddressSuggestions(target: EditTarget, query: string) {
+    const trimmedQuery = query.trim();
+    if (
+      trimmedQuery.length < 3 ||
+      trimmedQuery === selectedAddressRef.current[target] ||
+      /^current gps location$/i.test(trimmedQuery)
+    ) {
+      setAddressResults((current) => ({ ...current, [target]: [] }));
+      return undefined;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setSearchTarget(target);
+      setSearchPhase("searching");
+
+      searchRouteAddress(trimmedQuery)
+        .then((results) => {
+          if (cancelled) {
+            return;
+          }
+
+          setAddressResults((current) => ({ ...current, [target]: results }));
+          setSearchPhase("ready");
+        })
+        .catch(() => {
+          if (cancelled) {
+            return;
+          }
+
+          setAddressResults((current) => ({ ...current, [target]: [] }));
+          setSearchPhase("error");
+        });
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }
+
+  function handleAddressInputChange(target: EditTarget, value: string) {
+    selectedAddressRef.current[target] = "";
+    setAddressInputs((current) => ({ ...current, [target]: value }));
   }
 
   async function handleAddressSearch(target: EditTarget) {
@@ -433,8 +572,11 @@ export default function App() {
   }
 
   function applyGeocodeResult(target: EditTarget, result: GeocodeResult) {
+    const label = compactAddress(result.label);
     setRoutePoint(target, result);
-    setAddressInputs((current) => ({ ...current, [target]: compactAddress(result.label) }));
+    selectedAddressRef.current[target] = label;
+    setAddressInputs((current) => ({ ...current, [target]: label }));
+    setAddressResults((current) => ({ ...current, [target]: [] }));
 
     const map = mapRef.current;
     if (map) {
@@ -455,6 +597,8 @@ export default function App() {
     setGraph(null);
     setSignals([]);
     setOverpassEndpoint(null);
+    setNavigationActive(false);
+    setNavigationMessage(null);
     setPhase("idle");
     setStatusText("Ready");
     setErrorText(null);
@@ -467,6 +611,8 @@ export default function App() {
     setGraph(null);
     setSignals([]);
     setOverpassEndpoint(null);
+    setNavigationActive(false);
+    setNavigationMessage(null);
   }
 
   function handleReset() {
@@ -480,9 +626,12 @@ export default function App() {
     setErrorText(null);
     setSearchPhase("idle");
     setSearchError(null);
+    selectedAddressRef.current = { start: "", end: "" };
     setAddressInputs({ start: "", end: "" });
     setAddressResults({ start: [], end: [] });
     setOverpassEndpoint(null);
+    setNavigationActive(false);
+    setNavigationMessage(null);
   }
 
   return (
@@ -509,7 +658,7 @@ export default function App() {
             value={addressInputs.start}
             results={addressResults.start}
             isSearching={searchPhase === "searching" && searchTarget === "start"}
-            onValueChange={(value) => setAddressInputs((current) => ({ ...current, start: value }))}
+            onValueChange={(value) => handleAddressInputChange("start", value)}
             onSearch={() => handleAddressSearch("start")}
             onPick={(result) => applyGeocodeResult("start", result)}
           />
@@ -519,7 +668,7 @@ export default function App() {
             value={addressInputs.end}
             results={addressResults.end}
             isSearching={searchPhase === "searching" && searchTarget === "end"}
-            onValueChange={(value) => setAddressInputs((current) => ({ ...current, end: value }))}
+            onValueChange={(value) => handleAddressInputChange("end", value)}
             onSearch={() => handleAddressSearch("end")}
             onPick={(result) => applyGeocodeResult("end", result)}
           />
@@ -576,6 +725,9 @@ export default function App() {
             <button type="button" onClick={useGpsAsStart} disabled={!gpsLocation}>
               Start here
             </button>
+            <button type="button" onClick={() => void routeFromGps()} disabled={!gpsLocation || isBusy}>
+              Route from here
+            </button>
             <button
               type="button"
               className={gpsFollowMode ? "active" : ""}
@@ -583,6 +735,14 @@ export default function App() {
               disabled={!gpsLocation}
             >
               Follow
+            </button>
+            <button
+              type="button"
+              className={navigationActive ? "active" : ""}
+              onClick={handleNavigationToggle}
+              disabled={isBusy && !navigationActive}
+            >
+              Navigate
             </button>
           </div>
           <div className="gps-meta">
@@ -593,6 +753,19 @@ export default function App() {
           </div>
           {gpsError ? <p className="gps-error">{gpsError}</p> : null}
         </section>
+
+        {(activeRoute || navigationActive || navigationMessage) ? (
+          <NavigationPanel
+            active={navigationActive}
+            autoReroute={autoReroute}
+            progress={navigationProgress}
+            message={navigationMessage}
+            route={activeRoute}
+            isBusy={isBusy}
+            onToggleAutoReroute={() => setAutoReroute((current) => !current)}
+            onReroute={() => void handleManualReroute()}
+          />
+        ) : null}
 
         <section className="settings-panel" aria-label="Route weighting">
           <div className="section-title">
@@ -720,9 +893,9 @@ function AddressSearchRow({
         </div>
       </label>
 
-      {results.length > 1 ? (
+      {results.length > 0 ? (
         <div className="address-results">
-          {results.slice(0, 3).map((result) => (
+          {results.slice(0, 4).map((result) => (
             <button key={result.id} type="button" onClick={() => onPick(result)}>
               {compactAddress(result.label)}
             </button>
@@ -770,6 +943,59 @@ function RouteSummary({
         </div>
       </dl>
     </article>
+  );
+}
+
+function NavigationPanel({
+  active,
+  autoReroute,
+  progress,
+  message,
+  route,
+  isBusy,
+  onToggleAutoReroute,
+  onReroute,
+}: {
+  active: boolean;
+  autoReroute: boolean;
+  progress: NavigationProgress | null;
+  message: string | null;
+  route: RouteResult | null;
+  isBusy: boolean;
+  onToggleAutoReroute: () => void;
+  onReroute: () => void;
+}) {
+  const title = progress?.arrived ? "Arrived" : active ? progress?.instruction.text ?? "Navigating" : "Navigation";
+
+  return (
+    <section className={`navigation-panel ${active ? "active" : ""} ${progress?.offRoute ? "off-route" : ""}`}>
+      <div className="navigation-main">
+        <div>
+          <span>{active ? "Next" : "Ready"}</span>
+          <h2>{title}</h2>
+        </div>
+        <strong>
+          {progress ? formatDistance(progress.distanceToInstructionMeters) : route ? formatDistance(route.distanceMeters) : "--"}
+        </strong>
+      </div>
+
+      <div className="navigation-meta">
+        <span>{progress ? navigationSummary(progress) : route ? `${formatDistance(route.distanceMeters)} route` : "No route"}</span>
+        {route ? <span>{route.trafficLights} lights</span> : null}
+      </div>
+
+      {message ? <p className="navigation-message">{message}</p> : null}
+      {progress?.offRoute ? <p className="navigation-warning">Off route</p> : null}
+
+      <div className="navigation-actions">
+        <button type="button" onClick={onReroute} disabled={isBusy}>
+          {isBusy ? "Routing" : "Reroute"}
+        </button>
+        <button type="button" className={autoReroute ? "active" : ""} onClick={onToggleAutoReroute}>
+          Auto reroute
+        </button>
+      </div>
+    </section>
   );
 }
 

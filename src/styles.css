@@ -284,6 +284,7 @@ dt {
 
 .settings-panel,
 .gps-panel,
+.navigation-panel,
 .status-strip,
 .error-panel,
 .comparison-panel,
@@ -344,6 +345,83 @@ dt {
 .gps-error {
   color: #8b1234;
   font-size: 0.82rem;
+}
+
+.navigation-panel {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border-left: 5px solid #9ca3af;
+}
+
+.navigation-panel.active {
+  border-left-color: var(--teal);
+}
+
+.navigation-panel.off-route {
+  border-left-color: var(--amber);
+  background: #fffaf0;
+}
+
+.navigation-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.navigation-main span,
+.navigation-meta,
+.navigation-message,
+.navigation-warning {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.navigation-main h2 {
+  margin-top: 2px;
+  color: #111827;
+  font-size: 1.05rem;
+  line-height: 1.18;
+}
+
+.navigation-main strong {
+  color: #0f3f3b;
+  font-size: 1.05rem;
+}
+
+.navigation-meta,
+.navigation-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.navigation-warning {
+  color: #92400e;
+  font-weight: 760;
+}
+
+.navigation-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+  color: #263548;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.navigation-actions button.active {
+  color: #ffffff;
+  background: var(--teal);
+  border-color: var(--teal);
+}
+
+.navigation-actions button:disabled {
+  color: #8a96a4;
+  background: #eef2f5;
+  cursor: progress;
 }
 
 .section-title {
