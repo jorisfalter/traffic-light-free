@@ -622,12 +622,19 @@ export default function App() {
   function handleSwap() {
     setStart(end);
     setEnd(start);
+    setAddressInputs((current) => ({ start: current.end, end: current.start }));
+    setAddressResults((current) => ({ start: current.end, end: current.start }));
+    selectedAddressRef.current = {
+      start: selectedAddressRef.current.end,
+      end: selectedAddressRef.current.start,
+    };
     setRoutes(EMPTY_ROUTES);
     setGraph(null);
     setSignals([]);
     setOverpassEndpoint(null);
     setNavigationActive(false);
     setNavigationMessage(null);
+    setSearchError(null);
   }
 
   function handleReset() {
@@ -677,6 +684,10 @@ export default function App() {
             onSearch={() => handleAddressSearch("start")}
             onPick={(result) => applyGeocodeResult("start", result)}
           />
+          <button type="button" className="address-swap-button" onClick={handleSwap} title="Swap start and finish">
+            <ArrowLeftRight size={17} />
+            <span>Swap start and finish</span>
+          </button>
           <AddressSearchRow
             target="end"
             label="Finish address"

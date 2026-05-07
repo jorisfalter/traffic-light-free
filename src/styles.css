@@ -183,6 +183,24 @@ dt {
   cursor: pointer;
 }
 
+.address-swap-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  gap: 7px;
+  color: #263548;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.address-swap-button span {
+  font-size: 0.82rem;
+  font-weight: 680;
+}
+
 .search-error {
   color: #8b1234;
   font-size: 0.82rem;
