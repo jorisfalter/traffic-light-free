@@ -71,6 +71,34 @@ button {
   backdrop-filter: blur(10px);
 }
 
+.control-panel.collapsed {
+  max-height: none;
+}
+
+.control-panel.collapsed .panel-content {
+  display: none;
+}
+
+.panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.panel-collapse-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  gap: 7px;
+  color: #263548;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+  font-weight: 680;
+}
+
 .panel-header {
   display: flex;
   align-items: center;
@@ -104,7 +132,6 @@ h1 {
 .panel-header p,
 .route-summary p,
 .data-footnote,
-.coordinate-readout span,
 .address-row label > span,
 dt {
   color: var(--text-muted);
@@ -136,6 +163,10 @@ dt {
   border-radius: 8px;
 }
 
+.address-input-wrap.with-location {
+  grid-template-columns: minmax(0, 1fr) 40px 40px;
+}
+
 .address-input-wrap:focus-within {
   border-color: #0f766e;
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
@@ -157,6 +188,10 @@ dt {
   background: #e2f3ef;
   border-left: 1px solid var(--line);
   cursor: pointer;
+}
+
+.address-input-wrap .address-location-button {
+  background: #f8fafc;
 }
 
 .address-input-wrap button:disabled {
@@ -183,96 +218,28 @@ dt {
   cursor: pointer;
 }
 
-.address-swap-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 34px;
-  gap: 7px;
-  color: #263548;
-  background: #f8fafc;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  cursor: pointer;
-}
-
-.address-swap-button span {
-  font-size: 0.82rem;
-  font-weight: 680;
-}
-
 .search-error {
   color: #8b1234;
   font-size: 0.82rem;
 }
 
-.target-switch {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  padding: 3px;
-  background: #e8eef3;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-
-.target-switch button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 38px;
-  gap: 8px;
-  color: #344052;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.target-switch button.active {
-  color: #0f172a;
-  background: #ffffff;
-  box-shadow: 0 1px 5px rgba(15, 23, 42, 0.12);
-}
-
-.coordinate-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.coordinate-readout {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  gap: 3px;
-  padding: 10px;
-  background: var(--panel-solid);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-
-.coordinate-readout strong {
-  overflow: hidden;
-  color: #111827;
-  font-size: 0.84rem;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .toolbar {
   display: grid;
-  grid-template-columns: 42px 42px 42px 1fr;
+  grid-template-columns: 42px minmax(0, 1fr) minmax(112px, 0.85fr);
   gap: 9px;
 }
 
 .icon-button,
-.primary-button {
+.primary-button,
+.secondary-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 42px;
   border-radius: 8px;
   cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
 }
 
 .icon-button {
@@ -281,21 +248,34 @@ dt {
   border: 1px solid var(--line);
 }
 
-.gps-toggle.active {
+.primary-button,
+.secondary-button {
+  gap: 8px;
+  padding: 0 12px;
+  font-weight: 720;
+}
+
+.primary-button {
+  color: #ffffff;
+  background: #0f766e;
+  border: 1px solid #0f766e;
+  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.25);
+}
+
+.secondary-button {
+  color: #263548;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+}
+
+.secondary-button.active {
   color: #ffffff;
   background: var(--teal);
   border-color: var(--teal);
 }
 
-.primary-button {
-  gap: 8px;
-  color: #ffffff;
-  background: #0f766e;
-  font-weight: 720;
-  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.25);
-}
-
-.primary-button:disabled {
+.primary-button:disabled,
+.secondary-button:disabled {
   cursor: progress;
   opacity: 0.82;
 }
@@ -323,33 +303,6 @@ dt {
   display: grid;
   gap: 8px;
   padding: 10px;
-}
-
-.gps-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.gps-actions button {
-  min-height: 36px;
-  color: #263548;
-  background: #f8fafc;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  cursor: pointer;
-}
-
-.gps-actions button.active {
-  color: #ffffff;
-  background: var(--teal);
-  border-color: var(--teal);
-}
-
-.gps-actions button:disabled {
-  color: #8a96a4;
-  background: #eef2f5;
-  cursor: default;
 }
 
 .gps-meta {
@@ -671,7 +624,6 @@ dt {
     padding: 12px;
   }
 
-  .coordinate-grid,
   .route-summary {
     grid-template-columns: 1fr;
   }

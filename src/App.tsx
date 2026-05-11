@@ -2,12 +2,11 @@ import {
   AlertTriangle,
   ArrowLeftRight,
   Bike,
-  Flag,
+  ChevronDown,
+  ChevronUp,
   LocateFixed,
   LoaderCircle,
-  MapPin,
   Navigation,
-  RefreshCw,
   Search,
   SlidersHorizontal,
 } from "lucide-react";
@@ -47,6 +46,8 @@ type GpsLocation = LatLon & {
 const AMSTERDAM_CENTER: LatLon = { lat: 52.3676, lon: 4.9041 };
 const DEFAULT_START: LatLon = { lat: 52.3786, lon: 4.8838 };
 const DEFAULT_END: LatLon = { lat: 52.3571, lon: 4.9308 };
+const DEFAULT_LIGHT_PENALTY_METERS = 1000;
+const DEFAULT_SEARCH_BUFFER_KM = 4.0;
 const EMPTY_ROUTES: Routes = { normal: null, avoidLights: null };
 
 export default function App() {
@@ -60,6 +61,8 @@ export default function App() {
   const editTargetRef = useRef<EditTarget>("start");
   const locationWatchIdRef = useRef<number | null>(null);
   const lastAutoRerouteAtRef = useRef(0);
+  const autoRouteTimerRef = useRef<number | null>(null);
+  const activeRouteRequestRef = useRef(0);
   const selectedAddressRef = useRef<Record<EditTarget, string>>({ start: "", end: "" });
 
   const [start, setStart] = useState<LatLon>(DEFAULT_START);
@@ -76,8 +79,8 @@ export default function App() {
   const [searchPhase, setSearchPhase] = useState<SearchPhase>("idle");
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchTarget, setSearchTarget] = useState<EditTarget | null>(null);
-  const [penaltyMeters, setPenaltyMeters] = useState(650);
-  const [paddingKm, setPaddingKm] = useState(2.6);
+  const [penaltyMeters, setPenaltyMeters] = useState(DEFAULT_LIGHT_PENALTY_METERS);
+  const [paddingKm, setPaddingKm] = useState(DEFAULT_SEARCH_BUFFER_KM);
   const [phase, setPhase] = useState<RoutePhase>("idle");
   const [statusText, setStatusText] = useState("Ready");
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -92,6 +95,7 @@ export default function App() {
   const [navigationActive, setNavigationActive] = useState(false);
   const [autoReroute, setAutoReroute] = useState(true);
   const [navigationMessage, setNavigationMessage] = useState<string | null>(null);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
 
   const routeButtonLabel = phase === "fetching" || phase === "building" || phase === "routing" ? "Routing" : "Route";
   const isBusy = phase === "fetching" || phase === "building" || phase === "routing";
@@ -123,6 +127,22 @@ export default function App() {
   useEffect(() => {
     return queueAddressSuggestions("end", addressInputs.end);
   }, [addressInputs.end]);
+
+  useEffect(() => {
+    if (autoRouteTimerRef.current !== null) {
+      window.clearTimeout(autoRouteTimerRef.current);
+    }
+
+    autoRouteTimerRef.current = window.setTimeout(() => {
+      void calculateRoutes(start, end);
+    }, 650);
+
+    return () => {
+      if (autoRouteTimerRef.current !== null) {
+        window.clearTimeout(autoRouteTimerRef.current);
+      }
+    };
+  }, [start, end, penaltyMeters, paddingKm]);
 
   useEffect(() => {
     if (!mapElementRef.current || mapRef.current) {
@@ -349,6 +369,9 @@ export default function App() {
     routeEnd: LatLon,
     options: { startNavigation?: boolean; reason?: string } = {},
   ) {
+    const requestId = activeRouteRequestRef.current + 1;
+    activeRouteRequestRef.current = requestId;
+
     setErrorText(null);
     setNavigationMessage(options.reason ?? null);
     setPhase("fetching");
@@ -356,6 +379,10 @@ export default function App() {
 
     try {
       const payload = await fetchBikeOsmData(routeStart, routeEnd, paddingKm);
+      if (requestId !== activeRouteRequestRef.current) {
+        return;
+      }
+
       setOverpassEndpoint(payload.endpoint);
       setSignals(extractSignalPoints(payload.elements));
 
@@ -364,6 +391,10 @@ export default function App() {
       await nextFrame();
 
       const nextGraph = buildBikeGraph(payload.elements);
+      if (requestId !== activeRouteRequestRef.current) {
+        return;
+      }
+
       setGraph(nextGraph);
 
       setPhase("routing");
@@ -383,6 +414,10 @@ export default function App() {
         throw new Error("No route found in this OSM extract. Try a larger search buffer or nearby points.");
       }
 
+      if (requestId !== activeRouteRequestRef.current) {
+        return;
+      }
+
       setRoutes({ normal, avoidLights });
       if (options.startNavigation) {
         setNavigationActive(true);
@@ -399,15 +434,6 @@ export default function App() {
     }
   }
 
-  function handleGpsToggle() {
-    if (gpsPhase === "tracking" || gpsPhase === "requesting") {
-      stopGpsTracking();
-      return;
-    }
-
-    startGpsTracking();
-  }
-
   function startGpsTracking() {
     if (locationWatchIdRef.current !== null) {
       navigator.geolocation.clearWatch(locationWatchIdRef.current);
@@ -418,9 +444,19 @@ export default function App() {
     setGpsError(null);
     setGpsFollowMode(true);
 
-    if (!navigator.geolocation) {
+    if (!window.isSecureContext && window.location.protocol !== "capacitor:") {
+      const message = "GPS location is blocked in HTTP live reload. Run a standalone iPhone build to test GPS.";
       setGpsPhase("error");
-      setGpsError("GPS is not available in this browser.");
+      setGpsError(message);
+      setSearchError(message);
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      const message = "GPS is not available in this browser.";
+      setGpsPhase("error");
+      setGpsError(message);
+      setSearchError(message);
       return;
     }
 
@@ -435,10 +471,14 @@ export default function App() {
           timestamp: position.timestamp,
         });
         setGpsPhase("tracking");
+        setGpsError(null);
+        setSearchError(null);
       },
       (error) => {
+        const message = gpsErrorMessage(error);
         setGpsPhase("error");
-        setGpsError(gpsErrorMessage(error));
+        setGpsError(message);
+        setSearchError(message);
       },
       {
         enableHighAccuracy: true,
@@ -450,20 +490,10 @@ export default function App() {
     locationWatchIdRef.current = id;
   }
 
-  function stopGpsTracking() {
-    if (locationWatchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(locationWatchIdRef.current);
-      locationWatchIdRef.current = null;
-    }
-
-    setGpsPhase("idle");
-    setGpsError(null);
-    setGpsLocation(null);
-  }
-
   function useGpsAsStart() {
     if (!gpsLocation) {
       startGpsTracking();
+      setSearchError("GPS is starting. Tap again once your position appears.");
       return;
     }
 
@@ -637,32 +667,13 @@ export default function App() {
     setSearchError(null);
   }
 
-  function handleReset() {
-    setStart(DEFAULT_START);
-    setEnd(DEFAULT_END);
-    setRoutes(EMPTY_ROUTES);
-    setSignals([]);
-    setGraph(null);
-    setPhase("idle");
-    setStatusText("Ready");
-    setErrorText(null);
-    setSearchPhase("idle");
-    setSearchError(null);
-    selectedAddressRef.current = { start: "", end: "" };
-    setAddressInputs({ start: "", end: "" });
-    setAddressResults({ start: [], end: [] });
-    setOverpassEndpoint(null);
-    setNavigationActive(false);
-    setNavigationMessage(null);
-  }
-
   return (
     <main className="app-shell">
       <section className="map-stage" aria-label="Amsterdam region cycling map">
         <div ref={mapElementRef} className="map-canvas" />
       </section>
 
-      <aside className="control-panel" aria-label="Route controls">
+      <aside className={`control-panel ${panelCollapsed ? "collapsed" : ""}`} aria-label="Route controls">
         <header className="panel-header">
           <div className="brand-mark">
             <Bike size={22} strokeWidth={2.2} />
@@ -673,206 +684,167 @@ export default function App() {
           </div>
         </header>
 
-        <section className="address-panel" aria-label="Address search">
-          <AddressSearchRow
-            target="start"
-            label="Start address"
-            value={addressInputs.start}
-            results={addressResults.start}
-            isSearching={searchPhase === "searching" && searchTarget === "start"}
-            onValueChange={(value) => handleAddressInputChange("start", value)}
-            onSearch={() => handleAddressSearch("start")}
-            onPick={(result) => applyGeocodeResult("start", result)}
-          />
-          <button type="button" className="address-swap-button" onClick={handleSwap} title="Swap start and finish">
-            <ArrowLeftRight size={17} />
-            <span>Swap start and finish</span>
-          </button>
-          <AddressSearchRow
-            target="end"
-            label="Finish address"
-            value={addressInputs.end}
-            results={addressResults.end}
-            isSearching={searchPhase === "searching" && searchTarget === "end"}
-            onValueChange={(value) => handleAddressInputChange("end", value)}
-            onSearch={() => handleAddressSearch("end")}
-            onPick={(result) => applyGeocodeResult("end", result)}
-          />
-          {searchError ? <p className="search-error">{searchError}</p> : null}
-        </section>
+        <div className="panel-content">
+          <section className="address-panel" aria-label="Address search">
+            <AddressSearchRow
+              target="start"
+              label="Start address"
+              value={addressInputs.start}
+              results={addressResults.start}
+              isSearching={searchPhase === "searching" && searchTarget === "start"}
+              onValueChange={(value) => handleAddressInputChange("start", value)}
+              onSearch={() => handleAddressSearch("start")}
+              onPick={(result) => applyGeocodeResult("start", result)}
+              onUseCurrentLocation={useGpsAsStart}
+              isLocating={gpsPhase === "requesting"}
+            />
+            <AddressSearchRow
+              target="end"
+              label="Finish address"
+              value={addressInputs.end}
+              results={addressResults.end}
+              isSearching={searchPhase === "searching" && searchTarget === "end"}
+              onValueChange={(value) => handleAddressInputChange("end", value)}
+              onSearch={() => handleAddressSearch("end")}
+              onPick={(result) => applyGeocodeResult("end", result)}
+            />
+            {searchError ? <p className="search-error">{searchError}</p> : null}
+          </section>
 
-        <div className="target-switch" role="group" aria-label="Point selector">
-          <button
-            className={editTarget === "start" ? "active" : ""}
-            type="button"
-            onClick={() => setEditTarget("start")}
-          >
-            <MapPin size={17} />
-            Start
-          </button>
-          <button
-            className={editTarget === "end" ? "active" : ""}
-            type="button"
-            onClick={() => setEditTarget("end")}
-          >
-            <Flag size={17} />
-            Finish
-          </button>
-        </div>
-
-        <div className="coordinate-grid">
-          <CoordinateReadout label="Start" point={start} />
-          <CoordinateReadout label="Finish" point={end} />
-        </div>
-
-        <div className="toolbar">
-          <button
-            type="button"
-            className={`icon-button gps-toggle ${gpsPhase === "tracking" ? "active" : ""}`}
-            onClick={handleGpsToggle}
-            title={gpsPhase === "tracking" || gpsPhase === "requesting" ? "Stop GPS" : "Start GPS"}
-          >
-            {gpsPhase === "requesting" ? <LoaderCircle className="spin" size={18} /> : <LocateFixed size={18} />}
-          </button>
-          <button type="button" className="icon-button" onClick={handleSwap} title="Swap start and finish">
-            <ArrowLeftRight size={18} />
-          </button>
-          <button type="button" className="icon-button" onClick={handleReset} title="Reset route">
-            <RefreshCw size={18} />
-          </button>
-          <button type="button" className="primary-button" onClick={handleRoute} disabled={isBusy}>
-            {isBusy ? <LoaderCircle className="spin" size={18} /> : <Navigation size={18} />}
-            {routeButtonLabel}
-          </button>
-        </div>
-
-        <section className="gps-panel" aria-label="GPS controls">
-          <div className="gps-actions">
-            <button type="button" onClick={useGpsAsStart} disabled={!gpsLocation}>
-              Start here
+          <div className="toolbar">
+            <button type="button" className="icon-button" onClick={handleSwap} title="Swap start and finish">
+              <ArrowLeftRight size={18} />
             </button>
-            <button type="button" onClick={() => void routeFromGps()} disabled={!gpsLocation || isBusy}>
-              Route from here
+            <button type="button" className="primary-button" onClick={handleRoute} disabled={isBusy}>
+              {isBusy ? <LoaderCircle className="spin" size={18} /> : <Navigation size={18} />}
+              {routeButtonLabel}
             </button>
             <button
               type="button"
-              className={gpsFollowMode ? "active" : ""}
-              onClick={() => setGpsFollowMode((current) => !current)}
-              disabled={!gpsLocation}
-            >
-              Follow
-            </button>
-            <button
-              type="button"
-              className={navigationActive ? "active" : ""}
+              className={`secondary-button ${navigationActive ? "active" : ""}`}
               onClick={handleNavigationToggle}
               disabled={isBusy && !navigationActive}
+              title={navigationActive ? "Stop navigation" : "Start navigation"}
             >
+              <Navigation size={18} />
               Navigate
             </button>
           </div>
-          <div className="gps-meta">
-            <span>{gpsLabel(gpsPhase, gpsLocation)}</span>
-            {gpsLocation?.speed !== null && gpsLocation?.speed !== undefined ? (
-              <span>{formatSpeed(gpsLocation.speed)}</span>
-            ) : null}
-          </div>
-          {gpsError ? <p className="gps-error">{gpsError}</p> : null}
-        </section>
 
-        {(activeRoute || navigationActive || navigationMessage) ? (
-          <NavigationPanel
-            active={navigationActive}
-            autoReroute={autoReroute}
-            progress={navigationProgress}
-            message={navigationMessage}
-            route={activeRoute}
-            isBusy={isBusy}
-            onToggleAutoReroute={() => setAutoReroute((current) => !current)}
-            onReroute={() => void handleManualReroute()}
-          />
-        ) : null}
+          <section className="gps-panel" aria-label="GPS status">
+            <div className="gps-meta">
+              <span>{gpsLabel(gpsPhase, gpsLocation)}</span>
+              {gpsLocation?.speed !== null && gpsLocation?.speed !== undefined ? (
+                <span>{formatSpeed(gpsLocation.speed)}</span>
+              ) : null}
+            </div>
+            {gpsError ? <p className="gps-error">{gpsError}</p> : null}
+          </section>
 
-        <section className="settings-panel" aria-label="Route weighting">
-          <div className="section-title">
-            <SlidersHorizontal size={17} />
-            Cost model
-          </div>
-          <label className="range-row">
-            <span>Light penalty</span>
-            <strong>{penaltyMeters} m</strong>
-            <input
-              min="150"
-              max="1400"
-              step="50"
-              type="range"
-              value={penaltyMeters}
-              onChange={(event) => setPenaltyMeters(Number(event.target.value))}
+          {navigationActive ? (
+            <NavigationPanel
+              active={navigationActive}
+              autoReroute={autoReroute}
+              progress={navigationProgress}
+              message={navigationMessage}
+              route={activeRoute}
+              isBusy={isBusy}
+              onToggleAutoReroute={() => setAutoReroute((current) => !current)}
+              onReroute={() => void handleManualReroute()}
             />
-          </label>
-          <label className="range-row">
-            <span>Search buffer</span>
-            <strong>{paddingKm.toFixed(1)} km</strong>
-            <input
-              min="1.2"
-              max="5"
-              step="0.2"
-              type="range"
-              value={paddingKm}
-              onChange={(event) => setPaddingKm(Number(event.target.value))}
-            />
-          </label>
-        </section>
+          ) : null}
 
-        <section className="status-strip" aria-live="polite">
-          <span className={`status-dot ${phase}`} />
-          <span>{statusText}</span>
-        </section>
-
-        {errorText ? (
-          <section className="error-panel">
-            <AlertTriangle size={18} />
-            <span>{errorText}</span>
+          <section className="settings-panel" aria-label="Route weighting">
+            <div className="section-title">
+              <SlidersHorizontal size={17} />
+              Cost model
+            </div>
+            <label className="range-row">
+              <span>Light penalty</span>
+              <strong>{penaltyMeters} m</strong>
+              <input
+                min="150"
+                max="1400"
+                step="50"
+                type="range"
+                value={penaltyMeters}
+                onChange={(event) => setPenaltyMeters(Number(event.target.value))}
+              />
+            </label>
+            <label className="range-row">
+              <span>Search buffer</span>
+              <strong>{paddingKm.toFixed(1)} km</strong>
+              <input
+                min="1.2"
+                max="5"
+                step="0.2"
+                type="range"
+                value={paddingKm}
+                onChange={(event) => setPaddingKm(Number(event.target.value))}
+              />
+            </label>
           </section>
-        ) : null}
 
-        <section className="route-list" aria-label="Route results">
-          <RouteSummary title="Normal" accent="blue" route={routes.normal} />
-          <RouteSummary title="Avoid lights" accent="green" route={routes.avoidLights} />
-        </section>
-
-        {routeComparison ? (
-          <section className="comparison-panel">
-            <strong>{formatLightCount(Math.max(routeComparison.fewerLights, 0))} fewer</strong>
-            <span>{formatDistance(Math.max(routeComparison.extraDistance, 0))} extra distance</span>
+          <section className="status-strip" aria-live="polite">
+            <span className={`status-dot ${phase}`} />
+            <span>{statusText}</span>
           </section>
-        ) : null}
 
-        {routes.normal || routes.avoidLights ? (
-          <section className="route-light-key" aria-label="Highlighted traffic lights">
-            <span>
-              <i className="key-dot normal" />
-              Normal
-            </span>
-            <span>
-              <i className="key-dot avoid" />
-              Avoid lights
-            </span>
-            <span>
-              <i className="key-dot both" />
-              Both
-            </span>
+          {errorText ? (
+            <section className="error-panel">
+              <AlertTriangle size={18} />
+              <span>{errorText}</span>
+            </section>
+          ) : null}
+
+          <section className="route-list" aria-label="Route results">
+            <RouteSummary title="Normal" accent="blue" route={routes.normal} />
+            <RouteSummary title="Avoid lights" accent="green" route={routes.avoidLights} />
           </section>
-        ) : null}
 
-        {graph ? (
-          <footer className="data-footnote">
-            <span>{graph.stats.routedNodes.toLocaleString()} nodes</span>
-            <span>{graph.stats.signalNodes.toLocaleString()} routed lights</span>
-            <span>{signals.length.toLocaleString()} mapped lights</span>
-            {overpassEndpoint ? <span>{new URL(overpassEndpoint).hostname}</span> : null}
-          </footer>
-        ) : null}
+          {routeComparison ? (
+            <section className="comparison-panel">
+              <strong>{formatLightCount(Math.max(routeComparison.fewerLights, 0))} fewer</strong>
+              <span>{formatDistance(Math.max(routeComparison.extraDistance, 0))} extra distance</span>
+            </section>
+          ) : null}
+
+          {routes.normal || routes.avoidLights ? (
+            <section className="route-light-key" aria-label="Highlighted traffic lights">
+              <span>
+                <i className="key-dot normal" />
+                Normal
+              </span>
+              <span>
+                <i className="key-dot avoid" />
+                Avoid lights
+              </span>
+              <span>
+                <i className="key-dot both" />
+                Both
+              </span>
+            </section>
+          ) : null}
+
+          {graph ? (
+            <footer className="data-footnote">
+              <span>{graph.stats.routedNodes.toLocaleString()} nodes</span>
+              <span>{graph.stats.signalNodes.toLocaleString()} routed lights</span>
+              <span>{signals.length.toLocaleString()} mapped lights</span>
+              {overpassEndpoint ? <span>{new URL(overpassEndpoint).hostname}</span> : null}
+            </footer>
+          ) : null}
+        </div>
+
+        <button
+          type="button"
+          className="panel-collapse-button"
+          onClick={() => setPanelCollapsed((current) => !current)}
+          aria-expanded={!panelCollapsed}
+        >
+          {panelCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+          <span>{panelCollapsed ? "Show controls" : "Hide controls"}</span>
+        </button>
       </aside>
     </main>
   );
@@ -887,6 +859,8 @@ function AddressSearchRow({
   onValueChange,
   onSearch,
   onPick,
+  onUseCurrentLocation,
+  isLocating = false,
 }: {
   target: EditTarget;
   label: string;
@@ -896,6 +870,8 @@ function AddressSearchRow({
   onValueChange: (value: string) => void;
   onSearch: () => void;
   onPick: (result: GeocodeResult) => void;
+  onUseCurrentLocation?: () => void;
+  isLocating?: boolean;
 }) {
   return (
     <form
@@ -907,12 +883,22 @@ function AddressSearchRow({
     >
       <label>
         <span>{label}</span>
-        <div className="address-input-wrap">
+        <div className={`address-input-wrap ${onUseCurrentLocation ? "with-location" : ""}`}>
           <input
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
             placeholder={target === "start" ? "Amsterdam Centraal" : "Gerard Doulaan 1, Amstelveen"}
           />
+          {onUseCurrentLocation ? (
+            <button
+              type="button"
+              className="address-location-button"
+              title="Use current location as start"
+              onClick={onUseCurrentLocation}
+            >
+              {isLocating ? <LoaderCircle className="spin" size={17} /> : <LocateFixed size={17} />}
+            </button>
+          ) : null}
           <button type="submit" title={`Search ${label.toLowerCase()}`} disabled={isSearching || value.trim().length < 2}>
             {isSearching ? <LoaderCircle className="spin" size={17} /> : <Search size={17} />}
           </button>
@@ -929,17 +915,6 @@ function AddressSearchRow({
         </div>
       ) : null}
     </form>
-  );
-}
-
-function CoordinateReadout({ label, point }: { label: string; point: LatLon }) {
-  return (
-    <div className="coordinate-readout">
-      <span>{label}</span>
-      <strong>
-        {point.lat.toFixed(5)}, {point.lon.toFixed(5)}
-      </strong>
-    </div>
   );
 }
 
