@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:phone": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
     "ios:sync": "npm run build && cap sync ios",
+    "ios:live:sync": "node scripts/ios-live-sync.mjs",
     "ios:open": "npm run ios:sync && cap open ios",
     "preview": "vite preview --host 127.0.0.1"
   },
