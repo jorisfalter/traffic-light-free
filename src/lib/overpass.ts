@@ -89,6 +89,14 @@ out body qt;
       window.clearTimeout(timeout);
 
       if (!response.ok) {
+        if (response.status === 504) {
+          throw new Error("Overpass timed out. Try a smaller search buffer or retry in a minute.");
+        }
+
+        if (response.status === 429) {
+          throw new Error("Overpass is rate limiting requests. Wait a minute and try again.");
+        }
+
         throw new Error(`Overpass returned ${response.status}`);
       }
 

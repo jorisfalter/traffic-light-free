@@ -47,7 +47,7 @@ const AMSTERDAM_CENTER: LatLon = { lat: 52.3676, lon: 4.9041 };
 const DEFAULT_START: LatLon = { lat: 52.3786, lon: 4.8838 };
 const DEFAULT_END: LatLon = { lat: 52.3571, lon: 4.9308 };
 const DEFAULT_LIGHT_PENALTY_METERS = 1000;
-const DEFAULT_SEARCH_BUFFER_KM = 4.0;
+const DEFAULT_SEARCH_BUFFER_KM = 2.0;
 const EMPTY_ROUTES: Routes = { normal: null, avoidLights: null };
 
 export default function App() {
