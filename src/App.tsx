@@ -63,6 +63,7 @@ export default function App() {
   const lastAutoRerouteAtRef = useRef(0);
   const autoRouteTimerRef = useRef<number | null>(null);
   const activeRouteRequestRef = useRef(0);
+  const gpsStartPendingRef = useRef(false);
   const selectedAddressRef = useRef<Record<EditTarget, string>>({ start: "", end: "" });
 
   const [start, setStart] = useState<LatLon>(DEFAULT_START);
@@ -129,6 +130,10 @@ export default function App() {
   }, [addressInputs.end]);
 
   useEffect(() => {
+    if (gpsStartPendingRef.current) {
+      return;
+    }
+
     if (autoRouteTimerRef.current !== null) {
       window.clearTimeout(autoRouteTimerRef.current);
     }
@@ -361,6 +366,13 @@ export default function App() {
   }, [autoReroute, gpsLocation, isBusy, navigationActive, navigationProgress?.offRoute]);
 
   async function handleRoute() {
+    if (gpsStartPendingRef.current) {
+      startGpsTracking();
+      setStatusText("Waiting for GPS");
+      setSearchError("Getting current location. The route will update automatically.");
+      return;
+    }
+
     await calculateRoutes(start, end);
   }
 
@@ -427,6 +439,10 @@ export default function App() {
       setStatusText("Routes ready");
       setNavigationMessage(null);
     } catch (error) {
+      if (requestId !== activeRouteRequestRef.current) {
+        return;
+      }
+
       setPhase("error");
       setStatusText("Route failed");
       setErrorText(error instanceof Error ? error.message : "Something went wrong while routing.");
@@ -446,6 +462,7 @@ export default function App() {
 
     if (!window.isSecureContext && window.location.protocol !== "capacitor:") {
       const message = "GPS location is blocked in HTTP live reload. Run a standalone iPhone build to test GPS.";
+      gpsStartPendingRef.current = false;
       setGpsPhase("error");
       setGpsError(message);
       setSearchError(message);
@@ -454,6 +471,7 @@ export default function App() {
 
     if (!navigator.geolocation) {
       const message = "GPS is not available in this browser.";
+      gpsStartPendingRef.current = false;
       setGpsPhase("error");
       setGpsError(message);
       setSearchError(message);
@@ -462,20 +480,28 @@ export default function App() {
 
     const id = navigator.geolocation.watchPosition(
       (position) => {
-        setGpsLocation({
+        const nextLocation = {
           lat: position.coords.latitude,
           lon: position.coords.longitude,
           accuracy: position.coords.accuracy,
           heading: position.coords.heading,
           speed: position.coords.speed,
           timestamp: position.timestamp,
-        });
+        };
+
+        setGpsLocation(nextLocation);
         setGpsPhase("tracking");
         setGpsError(null);
         setSearchError(null);
+
+        if (gpsStartPendingRef.current) {
+          gpsStartPendingRef.current = false;
+          applyGpsStart(nextLocation);
+        }
       },
       (error) => {
         const message = gpsErrorMessage(error);
+        gpsStartPendingRef.current = false;
         setGpsPhase("error");
         setGpsError(message);
         setSearchError(message);
@@ -492,12 +518,32 @@ export default function App() {
 
   function useGpsAsStart() {
     if (!gpsLocation) {
+      gpsStartPendingRef.current = true;
+      if (autoRouteTimerRef.current !== null) {
+        window.clearTimeout(autoRouteTimerRef.current);
+        autoRouteTimerRef.current = null;
+      }
+      activeRouteRequestRef.current += 1;
+      setRoutes(EMPTY_ROUTES);
+      setGraph(null);
+      setSignals([]);
+      setOverpassEndpoint(null);
+      setNavigationActive(false);
+      setNavigationMessage(null);
+      setPhase("idle");
+      setStatusText("Waiting for GPS");
+      setErrorText(null);
       startGpsTracking();
-      setSearchError("GPS is starting. Tap again once your position appears.");
+      setSearchError("Getting current location. The route will update automatically.");
       return;
     }
 
-    setRoutePoint("start", gpsLocation);
+    gpsStartPendingRef.current = false;
+    applyGpsStart(gpsLocation);
+  }
+
+  function applyGpsStart(location: LatLon) {
+    setRoutePoint("start", location);
     selectedAddressRef.current.start = "Current GPS location";
     setAddressInputs((current) => ({ ...current, start: "Current GPS location" }));
     setGpsFollowMode(true);
@@ -631,6 +677,7 @@ export default function App() {
 
   function setRoutePoint(target: EditTarget, point: LatLon) {
     if (target === "start") {
+      gpsStartPendingRef.current = false;
       setStart(point);
       setEditTarget("end");
     } else {
