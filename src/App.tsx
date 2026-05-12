@@ -122,6 +122,12 @@ export default function App() {
   }, [editTarget]);
 
   useEffect(() => {
+    if (navigationActive) {
+      setPanelCollapsed(true);
+    }
+  }, [navigationActive]);
+
+  useEffect(() => {
     return queueAddressSuggestions("start", addressInputs.start);
   }, [addressInputs.start]);
 
@@ -374,6 +380,22 @@ export default function App() {
     }
 
     await calculateRoutes(start, end);
+  }
+
+  function centerOnGpsLocation() {
+    if (!gpsLocation) {
+      startGpsTracking();
+      setGpsError("GPS is starting. The map will center once your position appears.");
+      return;
+    }
+
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    setGpsFollowMode(true);
+    map.setView([gpsLocation.lat, gpsLocation.lon], Math.max(map.getZoom(), 17), { animate: true });
   }
 
   async function calculateRoutes(
@@ -718,6 +740,14 @@ export default function App() {
     <main className="app-shell">
       <section className="map-stage" aria-label="Amsterdam region cycling map">
         <div ref={mapElementRef} className="map-canvas" />
+        <button
+          type="button"
+          className={`map-location-button ${gpsFollowMode && gpsLocation ? "active" : ""}`}
+          onClick={centerOnGpsLocation}
+          title="Center on current location"
+        >
+          {gpsPhase === "requesting" ? <LoaderCircle className="spin" size={18} /> : <LocateFixed size={18} />}
+        </button>
       </section>
 
       <aside className={`control-panel ${panelCollapsed ? "collapsed" : ""}`} aria-label="Route controls">
@@ -1129,18 +1159,19 @@ function addRouteSignals(
       continue;
     }
 
+    const signalPoint = node.signalPoint ?? node;
     routeSignalIndex += 1;
 
-    const existing = signalsById.get(node.id);
+    const existing = signalsById.get(signalPoint.id);
     if (existing) {
       existing[indexKey] = routeSignalIndex;
       continue;
     }
 
-    signalsById.set(node.id, {
-      id: node.id,
-      lat: node.lat,
-      lon: node.lon,
+    signalsById.set(signalPoint.id, {
+      id: signalPoint.id,
+      lat: signalPoint.lat,
+      lon: signalPoint.lon,
       [indexKey]: routeSignalIndex,
     });
   }

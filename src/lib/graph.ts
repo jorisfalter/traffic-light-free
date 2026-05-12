@@ -14,6 +14,7 @@ export type GraphNode = {
   lat: number;
   lon: number;
   signal: boolean;
+  signalPoint?: SignalPoint;
   edges: GraphEdge[];
 };
 
@@ -34,13 +35,20 @@ export type SignalPoint = LatLon & {
   id: number;
 };
 
+const NEARBY_SIGNAL_RADIUS_METERS = 25;
+const SIGNAL_GRID_CELL_DEGREES = 0.0003;
+
 export function buildBikeGraph(elements: OsmElement[]): BikeGraph {
   const osmNodes = new Map<number, OsmNodeElement>();
   const ways: OsmWayElement[] = [];
+  const signalNodes: OsmNodeElement[] = [];
 
   for (const element of elements) {
     if (element.type === "node") {
       osmNodes.set(element.id, element);
+      if (isTrafficSignal(element.tags)) {
+        signalNodes.push(element);
+      }
     } else if (element.type === "way") {
       ways.push(element);
     }
@@ -103,6 +111,8 @@ export function buildBikeGraph(elements: OsmElement[]): BikeGraph {
     }
   }
 
+  attachNearbySignals(graphNodes, signalNodeIds, signalNodes);
+
   return {
     nodes: graphNodes,
     signalNodeIds,
@@ -149,6 +159,7 @@ function ensureGraphNode(
     lat: osmNode.lat,
     lon: osmNode.lon,
     signal,
+    signalPoint: signal ? { id: osmNode.id, lat: osmNode.lat, lon: osmNode.lon } : undefined,
     edges: [],
   };
 
@@ -158,6 +169,80 @@ function ensureGraphNode(
 
   nodes.set(osmNode.id, graphNode);
   return graphNode;
+}
+
+function attachNearbySignals(
+  nodes: Map<number, GraphNode>,
+  signalNodeIds: Set<number>,
+  signals: OsmNodeElement[],
+) {
+  const nodeGrid = buildNodeGrid(nodes);
+
+  for (const signal of signals) {
+    if (nodes.has(signal.id)) {
+      continue;
+    }
+
+    let nearestNode: GraphNode | null = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const node of nearbyGridNodes(nodeGrid, signal)) {
+      const distance = haversineMeters(signal, node);
+      if (distance < nearestDistance) {
+        nearestNode = node;
+        nearestDistance = distance;
+      }
+    }
+
+    if (!nearestNode || nearestDistance > NEARBY_SIGNAL_RADIUS_METERS) {
+      continue;
+    }
+
+    nearestNode.signal = true;
+    nearestNode.signalPoint = { id: signal.id, lat: signal.lat, lon: signal.lon };
+    signalNodeIds.add(nearestNode.id);
+  }
+}
+
+function buildNodeGrid(nodes: Map<number, GraphNode>): Map<string, GraphNode[]> {
+  const grid = new Map<string, GraphNode[]>();
+
+  for (const node of nodes.values()) {
+    const key = signalGridKey(gridIndex(node.lat), gridIndex(node.lon));
+    const bucket = grid.get(key);
+    if (bucket) {
+      bucket.push(node);
+    } else {
+      grid.set(key, [node]);
+    }
+  }
+
+  return grid;
+}
+
+function nearbyGridNodes(grid: Map<string, GraphNode[]>, point: LatLon): GraphNode[] {
+  const latIndex = gridIndex(point.lat);
+  const lonIndex = gridIndex(point.lon);
+  const nodes: GraphNode[] = [];
+
+  for (let latOffset = -1; latOffset <= 1; latOffset += 1) {
+    for (let lonOffset = -1; lonOffset <= 1; lonOffset += 1) {
+      const bucket = grid.get(signalGridKey(latIndex + latOffset, lonIndex + lonOffset));
+      if (bucket) {
+        nodes.push(...bucket);
+      }
+    }
+  }
+
+  return nodes;
+}
+
+function gridIndex(value: number): number {
+  return Math.floor(value / SIGNAL_GRID_CELL_DEGREES);
+}
+
+function signalGridKey(latIndex: number, lonIndex: number): string {
+  return `${latIndex}:${lonIndex}`;
 }
 
 function isBikeRoutableWay(tags?: OsmTags): boolean {

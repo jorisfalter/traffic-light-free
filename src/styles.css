@@ -52,6 +52,30 @@ button {
   height: 100%;
 }
 
+.map-location-button {
+  position: absolute;
+  z-index: 510;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  color: #243244;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(197, 207, 217, 0.9);
+  border-radius: 8px;
+  box-shadow: 0 10px 26px rgba(31, 42, 55, 0.18);
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+}
+
+.map-location-button.active {
+  color: #ffffff;
+  background: var(--teal);
+  border-color: var(--teal);
+}
+
 .control-panel {
   position: relative;
   z-index: 500;
@@ -622,6 +646,11 @@ dt {
     max-height: 48vh;
     margin: 8px;
     padding: 12px;
+  }
+
+  .map-location-button {
+    top: 10px;
+    right: 10px;
   }
 
   .route-summary {
