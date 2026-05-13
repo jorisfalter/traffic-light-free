@@ -82,6 +82,7 @@ export default function App() {
   const [searchTarget, setSearchTarget] = useState<EditTarget | null>(null);
   const [penaltyMeters, setPenaltyMeters] = useState(DEFAULT_LIGHT_PENALTY_METERS);
   const [paddingKm, setPaddingKm] = useState(DEFAULT_SEARCH_BUFFER_KM);
+  const [includeNearbySignals, setIncludeNearbySignals] = useState(true);
   const [phase, setPhase] = useState<RoutePhase>("idle");
   const [statusText, setStatusText] = useState("Ready");
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -153,7 +154,7 @@ export default function App() {
         window.clearTimeout(autoRouteTimerRef.current);
       }
     };
-  }, [start, end, penaltyMeters, paddingKm]);
+  }, [start, end, penaltyMeters, paddingKm, includeNearbySignals]);
 
   useEffect(() => {
     if (!mapElementRef.current || mapRef.current) {
@@ -424,7 +425,7 @@ export default function App() {
       setStatusText("Building bike graph");
       await nextFrame();
 
-      const nextGraph = buildBikeGraph(payload.elements);
+      const nextGraph = buildBikeGraph(payload.elements, { includeNearbySignals });
       if (requestId !== activeRouteRequestRef.current) {
         return;
       }
@@ -859,6 +860,14 @@ export default function App() {
                 value={paddingKm}
                 onChange={(event) => setPaddingKm(Number(event.target.value))}
               />
+            </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={includeNearbySignals}
+                onChange={(event) => setIncludeNearbySignals(event.target.checked)}
+              />
+              <span>Count nearby lights within 25 m</span>
             </label>
           </section>
 

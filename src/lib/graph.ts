@@ -35,10 +35,14 @@ export type SignalPoint = LatLon & {
   id: number;
 };
 
+export type BikeGraphOptions = {
+  includeNearbySignals?: boolean;
+};
+
 const NEARBY_SIGNAL_RADIUS_METERS = 25;
 const SIGNAL_GRID_CELL_DEGREES = 0.0003;
 
-export function buildBikeGraph(elements: OsmElement[]): BikeGraph {
+export function buildBikeGraph(elements: OsmElement[], options: BikeGraphOptions = {}): BikeGraph {
   const osmNodes = new Map<number, OsmNodeElement>();
   const ways: OsmWayElement[] = [];
   const signalNodes: OsmNodeElement[] = [];
@@ -111,7 +115,9 @@ export function buildBikeGraph(elements: OsmElement[]): BikeGraph {
     }
   }
 
-  attachNearbySignals(graphNodes, signalNodeIds, signalNodes);
+  if (options.includeNearbySignals ?? true) {
+    attachNearbySignals(graphNodes, signalNodeIds, signalNodes);
+  }
 
   return {
     nodes: graphNodes,

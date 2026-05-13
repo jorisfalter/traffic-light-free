@@ -448,6 +448,23 @@ dt {
   accent-color: var(--teal);
 }
 
+.checkbox-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  color: #374151;
+  font-size: 0.86rem;
+  line-height: 1.25;
+}
+
+.checkbox-row input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--teal);
+}
+
 .status-strip {
   display: flex;
   align-items: center;
