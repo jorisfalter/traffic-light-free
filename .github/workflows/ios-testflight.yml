@@ -15,6 +15,8 @@ jobs:
   build:
     runs-on: macos-26
     timeout-minutes: 30
+    outputs:
+      build_number: ${{ steps.buildnum.outputs.build_number }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -64,9 +66,13 @@ jobs:
           mkdir -p "$HOME/.appstoreconnect/private_keys"
           printf '%s' "$ASC_API_KEY_P8" > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
 
+      - name: Compute build number
+        id: buildnum
+        run: echo "build_number=$(date -u +%Y%m%d%H%M)" >> "$GITHUB_OUTPUT"
+
       - name: Archive (unsigned)
         run: |
-          BUILD_NUMBER="$(date -u +%Y%m%d%H%M)"
+          BUILD_NUMBER="${{ steps.buildnum.outputs.build_number }}"
           echo "Build number: $BUILD_NUMBER"
           xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
             -destination 'generic/platform=iOS' \
@@ -102,9 +108,10 @@ jobs:
         with:
           node-version: 22
 
-      - name: Attach newest build to internal testers
+      - name: Attach the uploaded build to internal testers
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          EXPECTED_BUILD: ${{ needs.build.outputs.build_number }}
         run: node scripts/attach-latest-testflight.mjs

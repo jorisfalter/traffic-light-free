@@ -55,18 +55,31 @@ if (!internal) {
 }
 console.log("Internal group:", internal.id, internal.attributes.name);
 
+// The build job passes the exact CFBundleVersion it uploaded so we attach
+// that build and not a stale "newest" that registers a moment later.
+const EXPECTED = process.env.EXPECTED_BUILD;
 let build = null;
 for (let i = 0; i < 30; i += 1) {
   const r = await api(
-    `/v1/builds?filter[app]=${app.id}&limit=1&sort=-uploadedDate&include=buildBetaDetail`,
+    `/v1/builds?filter[app]=${app.id}&limit=10&sort=-uploadedDate&include=buildBetaDetail`,
   );
-  build = r.body?.data?.[0];
-  const det = (r.body?.included || []).find((x) => x.type === "buildBetaDetails");
-  const state = build?.attributes?.processingState;
-  console.log(
-    `[try ${i}] build ${build?.attributes?.version} proc=${state} internal=${det?.attributes?.internalBuildState}`,
+  const list = r.body?.data || [];
+  const target = EXPECTED ? list.find((b) => b.attributes.version === EXPECTED) : list[0];
+  const det = (r.body?.included || []).find(
+    (x) => x.type === "buildBetaDetails" && x.id === target?.relationships?.buildBetaDetail?.data?.id,
   );
-  if (state && state !== "PROCESSING") break;
+  const state = target?.attributes?.processingState;
+  if (!target) {
+    console.log(`[try ${i}] build ${EXPECTED} not registered yet`);
+  } else {
+    console.log(
+      `[try ${i}] build ${target.attributes.version} proc=${state} internal=${det?.attributes?.internalBuildState}`,
+    );
+    if (state && state !== "PROCESSING") {
+      build = target;
+      break;
+    }
+  }
   await sleep(30000);
 }
 
